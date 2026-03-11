@@ -31,9 +31,7 @@ jobs:
 
       - name: Attempt to launch instance
         run: |
-          echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
-
-          oci compute instance launch \
+          RESULT=$(oci compute instance launch \
             --availability-domain "nGcD:AP-SYDNEY-1-AD-1" \
             --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
             --shape "VM.Standard.A1.Flex" \
@@ -42,5 +40,15 @@ jobs:
             --image-id "ocid1.image.oc1.ap-sydney-1.aaaaaaaa2vlj65gdvhd3f5g5bmp55jcubdnsnbeiqfkooiqhxl5qdwhzjrxq" \
             --assign-public-ip true \
             --display-name "voicevox-server" \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            2>&1 || true
+            --ssh-authorized-keys "${{ secrets.OCI_SSH_PUBLIC_KEY }}" \
+            2>&1 || true)
+
+          echo "$RESULT"
+
+          if echo "$RESULT" | grep -q "Out of host capacity\|InternalError\|out of capacity"; then
+            echo "❌ No capacity yet, will retry in 10 minutes"
+          elif echo "$RESULT" | grep -q "lifecycleState"; then
+            echo "✅ SUCCESS! Instance created!"
+          else
+            echo "⚠️ Unexpected response — check output above"
+          fi
