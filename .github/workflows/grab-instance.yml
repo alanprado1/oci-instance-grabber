@@ -1,0 +1,59 @@
+name: Grab OCI Instance
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # every 10 minutes
+  workflow_dispatch:  # allows manual trigger
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh | bash -s -- --accept-all-defaults
+          echo "$HOME/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/private_key.pem
+          chmod 600 ~/.oci/private_key.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER_OCID }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          tenancy=${{ secrets.OCI_TENANCY_OCID }}
+          region=${{ secrets.OCI_REGION }}
+          key_file=~/.oci/private_key.pem
+          EOF
+
+      - name: Attempt to launch instance
+        run: |
+          RESULT=$(oci compute instance launch \
+            --availability-domain "nGcD:AP-SYDNEY-1-AD-1" \
+            --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
+            --shape "VM.Standard.A1.Flex" \
+            --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
+            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+            --image-id "ocid1.image.oc1.ap-sydney-1.aaaaaaaa2vlj65gdvhd3f5g5bmp55jcubdnsnbeiqfkooiqhxl5qdwhzjrxq" \
+            --assign-public-ip true \
+            --display-name "voicevox-server" \
+            --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") \
+            2>&1)
+
+          echo "$RESULT"
+
+          if echo "$RESULT" | grep -q "Out of host capacity"; then
+            echo "❌ No capacity yet, will retry in 10 minutes"
+            exit 0
+          elif echo "$RESULT" | grep -q "lifecycleState"; then
+            echo "✅ SUCCESS! Instance created!"
+            echo "$RESULT"
+            exit 0
+          else
+            echo "⚠️ Unexpected response"
+            echo "$RESULT"
+            exit 0
+          fi
